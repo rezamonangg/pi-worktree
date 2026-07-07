@@ -72,6 +72,25 @@ function cacheRead(ctx: any): number {
   return total;
 }
 
+// Latest prompt cache hit rate as a percentage (0-100), mirroring Pi's built-in footer.
+// Algorithm: cacheRead / (input + cacheRead + cacheWrite) * 100, taken from the most
+// recent assistant message. Returns undefined when no usable assistant usage exists.
+function cacheHitRate(ctx: any): number | undefined {
+  const entries = ctx?.sessionManager?.getEntries?.() ?? [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const message = entries[i]?.type === "message" ? entries[i].message : undefined;
+    if (message?.role !== "assistant") continue;
+    const usage = message.usage;
+    const input = Number(usage?.input ?? 0);
+    const cacheReadVal = Number(usage?.cacheRead ?? 0);
+    const cacheWrite = Number(usage?.cacheWrite ?? 0);
+    const promptTokens = input + cacheReadVal + cacheWrite;
+    if (promptTokens > 0) return (cacheReadVal / promptTokens) * 100;
+    return undefined;
+  }
+  return undefined;
+}
+
 function activeBranch(state: WorktreeState, render?: FooterRenderOptions): string {
   if (state.mode === "inactive") return render?.gitBranch ?? state.branch ?? "unknown";
   return state.branch ?? render?.gitBranch ?? "unknown";
@@ -123,7 +142,13 @@ export function worktreeCompactFooterText(ctx: any, state: WorktreeState, render
     paint(BLUE, contextUsageText(ctx).replace(/^◫ /, "ctx ")),
   ];
 
-  if (cacheIn > 0) parts.push(paint(BLUE, `cache ${formatTokens(cacheIn)}`));
+  if (cacheIn > 0) {
+    const hitRate = cacheHitRate(ctx);
+    const cacheText = hitRate === undefined
+      ? `cache ${formatTokens(cacheIn)}`
+      : `cache ${formatTokens(cacheIn)} CH${hitRate.toFixed(1)}%`;
+    parts.push(paint(BLUE, cacheText));
+  }
 
   return parts.filter(Boolean).join(separator());
 }
